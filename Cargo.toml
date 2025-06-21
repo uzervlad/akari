@@ -8,4 +8,3 @@ anyhow = "1.0.98"
 binrw = "0.15.0"
 clap = { version = "4.5.40", features = ["derive"] }
 color = "0.3.1"
-easy_color = "0.1.13"

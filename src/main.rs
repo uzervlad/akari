@@ -39,6 +39,7 @@ enum AkariResponse {
   Info {
     length: u8,
     brightness: u8,
+    on: u8,
   },
 }
 
@@ -135,12 +136,14 @@ fn main() -> Result<()> {
       match info {
         AkariResponse::Info {
           length,
-          brightness
+          brightness,
+          on
         } => {
+          let on = on > 0;
           if json {
-            println!(r#"{{"leds":{},"brightness":{}}}"#, length, brightness);
+            println!(r#"{{"leds":{},"brightness":{},"on":{}}}"#, length, brightness, on);
           } else {
-            println!("{} LEDs | Brightness: {}/255", length, brightness);
+            println!("{} LEDs | Brightness: {}/255 | {}", length, brightness, if on { "on" } else { "off" });
           }
         },
         _ => {}

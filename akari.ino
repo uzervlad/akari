@@ -81,6 +81,7 @@ void loop() {
       Udp.write("INF");
       Udp.write((uint)NUM_LEDS);
       Udp.write((uint)base_brightness);
+      Udp.write((uint)on);
       endPacket();
     } else
     if (memcmp(incoming, TGL, 3) == 0) {

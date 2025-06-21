@@ -157,6 +157,11 @@ fn main() -> Result<()> {
 
       let colors: Vec<_> = colors.iter().map(|c| color::parse_color(&format!("#{c}")).unwrap()).collect();
       let gradient = construct_gradient(&colors, length);
+      #[cfg(debug_assertions)]
+      {
+        let gradient_string: String = gradient.iter().map(|c| format!("\x1b[48;2;{};{};{}m ", c.0, c.1, c.2)).collect();
+        println!("{}\x1b[0m", gradient_string);
+      }
       let message = AkariMessage::Set(gradient);
       socket.send_to(&message.message(), &address)?;
     },

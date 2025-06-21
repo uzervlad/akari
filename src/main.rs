@@ -3,21 +3,23 @@ use std::{env, fmt::Debug, io::Cursor, net::UdpSocket};
 use anyhow::Result;
 use binrw::{BinRead, BinWrite};
 use clap::{Parser, Subcommand};
-use easy_color::{Hex, IntoHSV};
+use color::{AlphaColor, ColorSpaceTag, DynamicColor, HueDirection, Srgb};
 
 #[derive(Debug, BinWrite)]
 #[bw(little)]
 enum AkariMessage {
-  #[bw(magic = 0u8)]
+  #[brw(magic = b"PNG")]
   Ping,
-  #[bw(magic = 1u8)]
-  SetHue(f32),
-  #[bw(magic = 2u8)]
-  SetBaseValue(f32),
-  #[bw(magic = 3u8)]
-  Pulse,
-  #[bw(magic = 255u8)]
-  Listen,
+  #[brw(magic = b"INF")]
+  Info,
+  #[brw(magic = b"TGL")]
+  Toggle,
+  #[brw(magic = b"SET")]
+  Set(Vec<(u8, u8, u8)>),
+  #[brw(magic = b"BRI")]
+  Brightness(u8),
+  #[brw(magic = b"MOD")]
+  Mode(u8),
 }
 
 impl AkariMessage {
@@ -30,14 +32,14 @@ impl AkariMessage {
 
 #[derive(Debug, BinRead)]
 #[br(little)]
-#[allow(unused)]
 enum AkariResponse {
-  #[br(magic = 0u8)]
+  #[br(magic = b"PNG")]
   Pong,
-  #[br(magic = 1u8)]
-  Result(u8),
-  #[br(magic = 255u8)]
-  Color([u8; 3]),
+  #[br(magic = b"INF")]
+  Info {
+    length: u8,
+    brightness: u8,
+  },
 }
 
 impl AkariResponse {
@@ -57,20 +59,48 @@ struct AkariCli {
 #[derive(Debug, Subcommand)]
 enum AkariCommand {
   Ping,
-  #[command(name = "hue")]
-  SetHue {
-    hue: f32,
+  Info {
+    #[clap(short, action)]
+    json: bool,
   },
-  #[command(name = "color")]
-  SetColor {
-    color: String,
+  Toggle,
+  #[command(name = "colors")]
+  SetColors {
+    colors: Vec<String>,
   },
-  #[command(name = "value")]
-  SetBaseValue {
-    value: f32,
+  #[command(name = "brightness")]
+  SetBrightness {
+    brightness: u8
   },
-  Pulse,
-  Listen,
+  #[command(name = "mode")]
+  SetMode {
+    mode: u8,
+  },
+}
+
+fn construct_gradient(colors: &[DynamicColor], length: usize) -> Vec<(u8, u8, u8)> {
+  let mut gradient = vec![(0, 0, 0); length];
+
+  let segments = (0..colors.len())
+    .map(|i| colors[i].interpolate(colors[(i+1)%colors.len()], ColorSpaceTag::Srgb, HueDirection::Shorter))
+    .collect::<Vec<_>>();
+
+  let segment_len = length as f32 / colors.len() as f32;
+
+  for i in 0..length {
+    let segment = segments[(i as f32 / segment_len).floor() as usize];
+    let progress = (i as f32 % segment_len) / segment_len;
+
+    let col: AlphaColor<Srgb> = segment.eval(progress).to_alpha_color();
+
+    gradient[i] = (
+      (col.components[0] * 255.) as u8,
+      (col.components[1] * 255.) as u8,
+      (col.components[2] * 255.) as u8,
+    );
+  }
+
+  gradient
 }
 
 fn main() -> Result<()> {
@@ -79,47 +109,64 @@ fn main() -> Result<()> {
   let socket = UdpSocket::bind("0.0.0.0:0")?;
   let address = env::var("MCU_ADDRESS")?;
 
+  let length = {
+    let command = AkariMessage::Info;
+    socket.send_to(&command.message(), &address)?;
+    match AkariResponse::wait_for(&socket) {
+      Ok(AkariResponse::Info { length, .. }) => length,
+      _ => panic!("No info received from server")
+    }
+  } as usize;
+
   let cli = AkariCli::parse();
 
   match cli.command {
     AkariCommand::Ping => {
-      let msg = AkariMessage::Ping.message();
-      socket.send_to(&msg, address)?;
-      println!("Received {:?}", AkariResponse::wait_for(&socket)?);
-    },
-    AkariCommand::SetHue { hue } => {
-      let msg = AkariMessage::SetHue(hue).message();
-      socket.send_to(&msg, address)?;
-      println!("Received {:?}", AkariResponse::wait_for(&socket)?);
+      let message = AkariMessage::Ping;
+      socket.send_to(&message.message(), &address)?;
+      let pong = AkariResponse::wait_for(&socket)?;
+      assert!(matches!(pong, AkariResponse::Pong));
+      println!("Pong");
     }
-    AkariCommand::SetColor { color } => {
-      let hex = Hex::try_from(color.as_str()).unwrap();
-      let hue = hex.to_hsv().hue() as f32 / 360.;
-
-      let msg = AkariMessage::SetHue(hue).message();
-      socket.send_to(&msg, address)?;
-      println!("Received {:?}", AkariResponse::wait_for(&socket)?);
-    },
-    AkariCommand::SetBaseValue { value } => {
-      let msg = AkariMessage::SetBaseValue(value).message();
-      socket.send_to(&msg, address)?;
-      println!("Received {:?}", AkariResponse::wait_for(&socket)?);
-    }
-    AkariCommand::Pulse => {
-      let msg = AkariMessage::Pulse.message();
-      socket.send_to(&msg, address)?;
-      println!("Received {:?}", AkariResponse::wait_for(&socket)?);
-    }
-    AkariCommand::Listen => {
-      let msg = AkariMessage::Listen.message();
-      socket.send_to(&msg, address)?;
-
-      println!("Listening...");
-
-      loop {
-        let res = AkariResponse::wait_for(&socket).unwrap();
-        println!("Received {:?}", res);
+    AkariCommand::Info { json } => {
+      let message = AkariMessage::Info;
+      socket.send_to(&message.message(), &address)?;
+      let info = AkariResponse::wait_for(&socket)?;
+      match info {
+        AkariResponse::Info {
+          length,
+          brightness
+        } => {
+          if json {
+            println!(r#"{{"leds":{},"brightness":{}}}"#, length, brightness);
+          } else {
+            println!("{} LEDs | Brightness: {}/255", length, brightness);
+          }
+        },
+        _ => {}
       }
+    },
+    AkariCommand::Toggle => {
+      let message = AkariMessage::Toggle;
+      socket.send_to(&message.message(), &address)?;
+    },
+    AkariCommand::SetColors { colors } => {
+      if colors.is_empty() {
+        return Ok(());
+      }
+
+      let colors: Vec<_> = colors.iter().map(|c| color::parse_color(&format!("#{c}")).unwrap()).collect();
+      let gradient = construct_gradient(&colors, length);
+      let message = AkariMessage::Set(gradient);
+      socket.send_to(&message.message(), &address)?;
+    },
+    AkariCommand::SetBrightness { brightness } => {
+      let message = AkariMessage::Brightness(brightness);
+      socket.send_to(&message.message(), &address)?;
+    }
+    AkariCommand::SetMode { mode } => {
+      let message = AkariMessage::Mode(mode);
+      socket.send_to(&message.message(), &address)?;
     }
   }
 

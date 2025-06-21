@@ -1,219 +1,138 @@
-// https://github.com/FastLED/FastLED/wiki/ESP8266-notes#pin-definitions
-#define FASTLED_ESP8266_NODEMCU_PIN_ORDER
-#include <FastLED.h>
-
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
-#include <IPAddress.h>
 
-#define NUM_LEDS 84
-#define DATA_PIN 1
+#include <FastLED.h>
 
-CRGB leds[NUM_LEDS];
+#define FASTLED_ESP8266_NODEMCU_PIN_ORDER
 
-typedef uint16_t timer;
-
-unsigned long last_ts = 0;
-const timer TICKS_PER_SECOND = 40;
-const unsigned long TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
-
-const timer PULSE_TICKS = TICKS_PER_SECOND * 3;
-const timer PULSE_MIDPOINT = PULSE_TICKS / 2;
-const float PULSE_VALUE_MULTIPLIER = 1.7f;
-const timer TRANSITION_TICKS = TICKS_PER_SECOND * 2;
-const timer TRANSITION_MIDPOINT = TRANSITION_TICKS / 2;
-const uint8_t BASE_SATURATION = 220;
-bool direct_transition = false;
-float base_value = 0.15f;
-float hue_from = 0.0f;
-float hue_to = 0.8f;
-CHSV current;
-timer transition_timer = TRANSITION_TICKS;
-timer pulse_timer = PULSE_TICKS;
-
-const char* SSID = "********";
-const char* PASSWORD = "********";
+#define DATA_PIN 5
+#define WIFI_SSID "********"
+#define WIFI_PASS "********"
 
 WiFiUDP Udp;
-unsigned int port = 8888;
-char incoming[256];
+#define UDP_PORT 8888
+char incoming[UDP_TX_PACKET_MAX_SIZE];
 
-IPAddress listenerAddr;
-uint16_t listenerPort;
-
-void udpResponsePong()
-{
+void beginPacket() {
   Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-  Udp.write(0);
+}
+
+void endPacket() {
   Udp.endPacket();
 }
 
-void udpResponseResult(bool result)
-{
-  Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-  Udp.write(1);
-  Udp.write(result);
-  Udp.endPacket();
-}
+#define NUM_LEDS 84
 
-void udpSendColor(const CRGB &rgb)
-{
-  if (!listenerAddr.isSet())
-  {
-    return;
-  }
+#define MODE_STATIC 0
+#define MODE_SCROLLING 1
+#define MODE_BREATHING 2
 
-  Udp.beginPacket(listenerAddr, listenerPort);
-  Udp.write(255);
-  Udp.write(rgb[0]);
-  Udp.write(rgb[1]);
-  Udp.write(rgb[2]);
-  Udp.endPacket();
-}
+CRGB leds[NUM_LEDS];
+CRGB display[NUM_LEDS];
+uint mode = MODE_STATIC;
+short base_brightness = 15;
+bool on = true;
 
-void setStripColor()
-{
-  CRGB rgb = hsv2rgb_spectrum(current);
-  udpSendColor(rgb);
-
-  fill_solid(leds, NUM_LEDS, rgb);
-  FastLED.show();
-}
-
-float lerp(float a, float b, float t)
-{
-  return a + (b - a) * t;
-}
-
-float easeInOutCubic(float x)
-{
-  return x < 0.5f ? (4.0f * x * x * x) : (1.0f - powf(2.0f - 2.0f * x, 3.0f) / 2.0f);
-}
-
-float easeInOutCubicDouble(float x)
-{
-  return x < 0.5f ? (1.0f - easeInOutCubic(x * 2.0f)) : easeInOutCubic(2.0f * x - 1.0f);
-}
-
-fract8 floatToFract(float x)
-{
-  return static_cast<uint8_t>(fminf(fmaxf(x, 0.0f), 1.0f) * 255.0f);
-}
-
-void tick() {
-  float hue = hue_to;
-  float value = base_value;
-
-  if (transition_timer < TRANSITION_TICKS)
-  {
-    transition_timer++;
-
-    if (transition_timer < TRANSITION_MIDPOINT)
-    {
-      hue = hue_from;
-    }
-
-    float value_mult = easeInOutCubicDouble(static_cast<float>(transition_timer) / static_cast<float>(TRANSITION_TICKS));
-    value = lerp(0, base_value, value_mult);
-  }
-
-  if (pulse_timer < PULSE_TICKS)
-  {
-    pulse_timer++;
-
-    float peak_value = fminf(base_value * PULSE_VALUE_MULTIPLIER, 1.0f);
-    float t = easeInOutCubicDouble(static_cast<float>(pulse_timer) / static_cast<float>(PULSE_TICKS));
-    value = lerp(peak_value, base_value, t);
-  }
-
-  current = CHSV(floatToFract(hue), BASE_SATURATION, floatToFract(value));
-
-  setStripColor();
-}
-
-void setup()
-{
+void setup() {
   Serial.begin(115200);
+  Serial.println("Connecting to WiFi...");
 
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(SSID, PASSWORD);
-  Serial.print("Connecting...");
-
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(100);
   }
-  Serial.println(" connected!");
 
-  Udp.begin(port);
+  Udp.begin(UDP_PORT);
 
-  Serial.printf("Listening at %s:%d\n", WiFi.localIP().toString().c_str(), port);
+  Serial.print("Connected, IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.printf("Listening on port %d\n", UDP_PORT);
+
+  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(display, NUM_LEDS);
+  fill_solid(leds, NUM_LEDS, CRGB::MediumPurple);
+  FastLED.setBrightness(base_brightness);
 }
 
-void loop()
-{
-  int packet_size = Udp.parsePacket();
-  if (packet_size)
-  {
-    Serial.printf("Received %d bytes\n", packet_size);
-    int len = Udp.read(incoming, 255);
-    incoming[len] = 0;
+const char PNG[4] = "PNG"; // ping
+const char INF[4] = "INF"; // request info
+const char TGL[4] = "TGL"; // toggle on/off
+const char SET[4] = "SET"; // set leds
+const char BRI[4] = "BRI"; // set brightness
+const char MOD[4] = "MOD"; // set mode
 
-    switch (incoming[0])
-    {
-      case 0: // Ping
-        udpResponsePong();
-        break;
-      case 1: // SetHue
-        if (len < 5)
-        {
-          return udpResponseResult(false);
-        }
+#define TICKS_PER_SECOND 15
+const unsigned long TICK_INTERVAL = 1000000 / TICKS_PER_SECOND;
+unsigned long last_ts = 0;
 
-        transition_timer = 0;
+unsigned long ticks = 0;
 
-        hue_from = hue_to;
-        memcpy(&hue_to, &incoming[1], sizeof(hue_to));
+void loop() {
+  int packetSize = Udp.parsePacket();
+  if (packetSize) {
+    int len = Udp.read(incoming, UDP_TX_PACKET_MAX_SIZE);
 
-        udpResponseResult(true);
-        break;
-      case 2: // SetBaseValue
-        if (len < 5)
-        {
-          return udpResponseResult(false);
-        }
+    if (memcmp(incoming, PNG, 3) == 0) {
+      beginPacket();
+      Udp.write("PNG");
+      endPacket();
+    } else
+    if (memcmp(incoming, INF, 3) == 0) {
+      beginPacket();
+      Udp.write("INF");
+      Udp.write((uint)NUM_LEDS);
+      Udp.write((uint)base_brightness);
+      endPacket();
+    } else
+    if (memcmp(incoming, TGL, 3) == 0) {
+      on = !on;
 
-        memcpy(&base_value, &incoming[1], sizeof(base_value));
-      case 3: // Pulse
-        if (pulse_timer == PULSE_TICKS)
-        {
-          pulse_timer = 0;
-        }
-        else if (pulse_timer > PULSE_MIDPOINT)
-        {
-          pulse_timer = PULSE_TICKS - pulse_timer;
-        }
-
-        udpResponseResult(true);
-        break;
-      case 255: // Listen
-        listenerAddr = Udp.remoteIP();
-        listenerPort = Udp.remotePort();
-        udpResponseResult(true);
-        break;
-      default:
-        udpResponseResult(false);
+      if (on) {
+        FastLED.setBrightness(base_brightness);
+      } else {
+        FastLED.setBrightness(0);
+      }
+    } else
+    if (memcmp(incoming, SET, 3) == 0) {
+      memcpy(leds, &incoming[3], sizeof(CRGB) * NUM_LEDS);
+    } else
+    if (memcmp(incoming, BRI, 3) == 0) {
+      base_brightness = incoming[3];
+      FastLED.setBrightness(base_brightness);
+    } else
+    if (memcmp(incoming, MOD, 3) == 0) {
+      mode = incoming[3];
     }
   }
 
   unsigned long ts = micros();
 
-  if (ts - last_ts >= TICK_INTERVAL)
-  {
+  if (ts - last_ts >= TICK_INTERVAL) {
     last_ts = ts;
-    tick();
+    ticks++;
+
+    switch (mode) {
+      case MODE_STATIC: {
+        memcpy(display, leds, sizeof(CRGB) * NUM_LEDS);
+        break;
+      }
+      case MODE_SCROLLING: {
+        int l = ticks % NUM_LEDS;
+        int r = NUM_LEDS - l;
+        memcpy(display, &leds[l], sizeof(CRGB) * r);
+        memcpy(&display[r], leds, sizeof(CRGB) * l);
+        break;
+      }
+      case MODE_BREATHING: {
+        memcpy(display, leds, sizeof(CRGB) * NUM_LEDS);
+        float t = 1 - (sin((float)ticks / 12) + 1) / 4;
+        float brightness = (float)base_brightness * t;
+        if (on) {
+          FastLED.setBrightness((short)brightness);
+        }
+        break;
+      }
+    }
+
+    FastLED.show();
   }
 }

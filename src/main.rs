@@ -109,7 +109,7 @@ fn main() -> Result<()> {
   let _ = dotenvy::dotenv();
 
   let socket = UdpSocket::bind("0.0.0.0:0")?;
-  let address = env::var("MCU_ADDRESS")?;
+  let address = env!("MCU_ADDRESS");
 
   let length = {
     let command = AkariMessage::Info;

@@ -5,10 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
-binary-stream = "10.0.0"
 binrw = "0.15.0"
 clap = { version = "4.5.40", features = ["derive"] }
 color = "0.3.1"
-dotenvy = "0.15.7"
 easy_color = "0.1.13"
-rand = "0.9.1"

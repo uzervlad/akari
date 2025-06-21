@@ -3,7 +3,7 @@ use std::{env, fmt::Debug, io::Cursor, net::UdpSocket};
 use anyhow::Result;
 use binrw::{BinRead, BinWrite};
 use clap::{Parser, Subcommand};
-use color::{AlphaColor, ColorSpaceTag, DynamicColor, Hsl, HueDirection, Srgb};
+use color::{AlphaColor, ColorSpaceTag, DynamicColor, Hsl, HueDirection};
 
 #[derive(Debug, BinWrite)]
 #[bw(little)]
@@ -106,8 +106,6 @@ fn construct_gradient(colors: &[DynamicColor], length: usize) -> Vec<(u8, u8, u8
 }
 
 fn main() -> Result<()> {
-  let _ = dotenvy::dotenv();
-
   let socket = UdpSocket::bind("0.0.0.0:0")?;
   let address = env!("MCU_ADDRESS");
 

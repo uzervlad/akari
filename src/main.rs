@@ -5,6 +5,15 @@ use binrw::{BinRead, BinWrite};
 use clap::{Parser, Subcommand};
 use color::{AlphaColor, ColorSpaceTag, DynamicColor, Hsl, HueDirection};
 
+#[derive(Debug, BinRead)]
+#[br(repr = u8)]
+#[repr(u8)]
+enum AkariMode {
+  Static = 0,
+  Scrolling = 1,
+  Breathing = 2,
+}
+
 #[derive(Debug, BinWrite)]
 #[bw(little)]
 enum AkariMessage {
@@ -38,6 +47,7 @@ enum AkariResponse {
   #[br(magic = b"INF")]
   Info {
     length: u8,
+    mode: AkariMode,
     brightness: u8,
     on: u8,
   },
@@ -136,14 +146,17 @@ fn main() -> Result<()> {
       match info {
         AkariResponse::Info {
           length,
+          mode,
           brightness,
           on
         } => {
           let on = on > 0;
           if json {
-            println!(r#"{{"leds":{},"brightness":{},"on":{}}}"#, length, brightness, on);
+            println!(r#"{{"leds":{},"mode":{},"brightness":{},"on":{}}}"#, length, mode as u8, brightness, on);
           } else {
-            println!("{} LEDs | Brightness: {}/255 | {}", length, brightness, if on { "on" } else { "off" });
+            println!("{} LEDs", length);
+            println!("Mode: {:?}", mode);
+            println!("Brightness: {}/255 | {}", brightness, if on { "on" } else { "off" });
           }
         },
         _ => {}

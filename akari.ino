@@ -80,6 +80,7 @@ void loop() {
       beginPacket();
       Udp.write("INF");
       Udp.write((uint)NUM_LEDS);
+      Udp.write((uint)mode);
       Udp.write((uint)base_brightness);
       Udp.write((uint)on);
       endPacket();

@@ -17,17 +17,17 @@ enum AkariMode {
 #[derive(Debug, BinWrite)]
 #[bw(little)]
 enum AkariMessage {
-  #[brw(magic = b"PNG")]
+  #[bw(magic = b"PNG")]
   Ping,
-  #[brw(magic = b"INF")]
+  #[bw(magic = b"INF")]
   Info,
-  #[brw(magic = b"TGL")]
+  #[bw(magic = b"TGL")]
   Toggle,
-  #[brw(magic = b"SET")]
+  #[bw(magic = b"SET")]
   Set(Vec<(u8, u8, u8)>),
-  #[brw(magic = b"BRI")]
+  #[bw(magic = b"BRI")]
   Brightness(u8),
-  #[brw(magic = b"MOD")]
+  #[bw(magic = b"MOD")]
   Mode(u8),
 }
 

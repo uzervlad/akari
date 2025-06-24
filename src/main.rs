@@ -1,4 +1,4 @@
-use std::{env, fmt::Debug, io::Cursor, net::UdpSocket};
+use std::{env, fmt::Debug, io::Cursor, net::UdpSocket, time::Duration};
 
 use anyhow::Result;
 use binrw::{BinRead, BinWrite};
@@ -120,6 +120,8 @@ fn main() -> Result<()> {
   let socket = UdpSocket::bind("0.0.0.0:0")?;
   let address = env!("MCU_ADDRESS");
 
+  socket.set_read_timeout(Some(Duration::from_secs(1)))?;
+
   let length = {
     let command = AkariMessage::Info;
     socket.send_to(&command.message(), &address)?;
@@ -142,7 +144,10 @@ fn main() -> Result<()> {
     AkariCommand::Info { json } => {
       let message = AkariMessage::Info;
       socket.send_to(&message.message(), &address)?;
-      let info = AkariResponse::wait_for(&socket)?;
+      let Ok(info) = AkariResponse::wait_for(&socket) else {
+        println!(r#"{{"leds":0,"brightness":255,"on":true}}"#);
+        return Ok(())
+      };
       match info {
         AkariResponse::Info {
           length,
